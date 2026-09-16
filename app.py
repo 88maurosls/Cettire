@@ -32,22 +32,18 @@ SHEET_CONFIG = {
     "Non EU": {
         "cod_cli": "89746",
         "price_column": "Total EUR",
-        "divide_by_vat": False,
     },
     "EU": {
         "cod_cli": "89747",
-        "price_column": "Gross EUR",
-        "divide_by_vat": False,
+        "price_column": "Total Due EUR",
     },
     "Netherlands": {
         "cod_cli": "89766",
         "price_column": "Total EUR",
-        "divide_by_vat": True,
     },
     "Germany": {
         "cod_cli": "89765",
         "price_column": "Total EUR",
-        "divide_by_vat": True,
     },
 }
 
@@ -80,7 +76,7 @@ DEFAULTS = {
     " INDICATORE_TIPORIGA": "0",
     " UM": "PZ",
     " QUANTITA": "1",
-    " IVA": "",
+    " IVA": "0",
     " SCONTO1": "0",
     " SCONTO2": "0",
     " MAGGIORAZIONE1": "0",
@@ -138,20 +134,16 @@ def parse_decimal(value):
         raise ValueError(f"Prezzo non valido: {value}")
 
 
-def format_price(value, divide_by_vat=False):
+def format_price(value):
     """
     Restituisce PREZZO_1 con 2 decimali e virgola.
 
     Non EU: Total EUR
-    EU: Gross EUR
-    Netherlands: Total EUR / 1,22
-    Germany: Total EUR / 1,22
+    EU: Total Due EUR
+    Netherlands: Total EUR
+    Germany: Total EUR
     """
     price = parse_decimal(value)
-
-    if divide_by_vat:
-        price = price / Decimal("1.22")
-
     price = price.quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
     return format(price, ".2f").replace(".", ",")
 
@@ -260,9 +252,30 @@ def validate_data_doc(data_doc_text):
     return parsed.strftime("%d/%m/%Y")
 
 
+
+
+def validate_num_doc_start(num_doc_text):
+    """Valida il NUM_DOC iniziale e lo restituisce come intero."""
+    raw = num_doc_text.strip()
+
+    if not raw:
+        raise ValueError("Inserisci NUM_DOC iniziale.")
+
+    try:
+        value = int(raw)
+    except ValueError:
+        raise ValueError("NUM_DOC iniziale deve essere un numero intero, es. 5.")
+
+    if value < 0:
+        raise ValueError("NUM_DOC iniziale non può essere negativo.")
+
+    return value
+
+
 def build_csv(excel_bytes, source_filename, num_doc, data_doc):
     statement_id = extract_statement_id(source_filename)
     data_doc = validate_data_doc(data_doc)
+    num_doc_corrente = validate_num_doc_start(num_doc)
     sheets = read_all_sheets(excel_bytes)
 
     output_rows = []
@@ -270,8 +283,14 @@ def build_csv(excel_bytes, source_filename, num_doc, data_doc):
 
     for sheet_name, config in SHEET_CONFIG.items():
         df = sheets[sheet_name]
+
+        # Il NUM_DOC avanza solo se questo cliente genera almeno una riga nel CSV.
+        if df.empty:
+            continue
+
         cod_cli = config["cod_cli"]
         price_column = config["price_column"]
+        num_doc_cliente = num_doc_corrente
 
         for _, src in df.iterrows():
             row = {header: DEFAULTS.get(header, "") for header in HEADERS}
@@ -287,16 +306,17 @@ def build_csv(excel_bytes, source_filename, num_doc, data_doc):
             row[" DESCR_ART_ESTESA"] = reference
             row[" DESCRIZIONE_RIGA"] = reference
             row[" DATA_DOC"] = data_doc
-            row[" NUM_DOC"] = str(num_doc).strip()
+            row[" NUM_DOC"] = str(num_doc_cliente)
             row[" PROGRESSIVO_RIGA"] = str(progressivo)
-            row[" PREZZO_1"] = format_price(
-                src[price_column],
-                divide_by_vat=config["divide_by_vat"],
-            )
+            row[" PREZZO_1"] = format_price(src[price_column])
             row[" NOTE_MOVIMENTO"] = statement_id
 
             output_rows.append(row)
             progressivo += 1
+
+        # Consuma il numero documento solo dopo aver effettivamente creato righe
+        # per questo cliente.
+        num_doc_corrente += 1
 
     if not output_rows:
         raise ValueError("Non ci sono righe da esportare nei quattro fogli Cettire.")
@@ -330,9 +350,12 @@ uploaded_file = st.file_uploader(
 )
 
 num_doc = st.text_input(
-    "NUM_DOC",
-    placeholder="Es. 123",
-    help="Numero documento da riportare su tutte le righe del CSV.",
+    "NUM_DOC iniziale",
+    placeholder="Es. 5",
+    help=(
+        "Numero documento del primo cliente che genera righe. "
+        "I clienti successivi con righe ricevono automaticamente il numero progressivo successivo."
+    ),
 )
 
 data_doc = st.text_input(
@@ -365,7 +388,7 @@ if uploaded_file is not None:
 
     if st.button("Genera CSV", type="primary", use_container_width=True):
         if not num_doc.strip():
-            st.error("Inserisci NUM_DOC prima di generare il CSV.")
+            st.error("Inserisci NUM_DOC iniziale prima di generare il CSV.")
         elif not data_doc.strip():
             st.error("Inserisci DATA_DOC prima di generare il CSV.")
         else:
