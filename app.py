@@ -138,12 +138,20 @@ def format_price(value):
     """
     Restituisce PREZZO_1 con 2 decimali e virgola.
 
+    Regola aggiuntiva:
+    - se l'importo sorgente è negativo, PREZZO_1 viene scritto come "0".
+
     Non EU: Total EUR
     EU: Total Due EUR
     Netherlands: Total EUR
     Germany: Total EUR
     """
     price = parse_decimal(value)
+
+    # Gli importi negativi non devono essere riportati nel CSV.
+    if price < Decimal("0"):
+        return "0"
+
     price = price.quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
     return format(price, ".2f").replace(".", ",")
 
