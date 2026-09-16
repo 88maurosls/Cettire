@@ -35,7 +35,7 @@ SHEET_CONFIG = {
     },
     "EU": {
         "cod_cli": "89747",
-        "price_column": "Total Due EUR",
+        "price_column": "Gross EUR",
     },
     "Netherlands": {
         "cod_cli": "89766",
@@ -142,7 +142,7 @@ def format_price(value):
     - se l'importo sorgente è negativo, PREZZO_1 viene scritto come "0".
 
     Non EU: Total EUR
-    EU: Total Due EUR
+    EU: Gross EUR
     Netherlands: Total EUR
     Germany: Total EUR
     """
